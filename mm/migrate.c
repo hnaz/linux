@@ -50,6 +50,7 @@
 #include <linux/memory.h>
 #include <linux/random.h>
 #include <linux/sched/sysctl.h>
+#include <linux/sched/numa_balancing.h>
 
 #include <asm/tlbflush.h>
 
@@ -365,8 +366,10 @@ int folio_migrate_mapping(struct address_space *mapping,
 
 	if (!mapping) {
 		/* Anonymous page without mapping */
-		if (folio_ref_count(folio) != expected_count)
+		if (folio_ref_count(folio) != expected_count) {
+			count_vm_events(PGMIGRATE_REFCOUNT_FAIL, nr);
 			return -EAGAIN;
+		}
 
 		/* No turning back from here */
 		newfolio->index = folio->index;
@@ -382,6 +385,7 @@ int folio_migrate_mapping(struct address_space *mapping,
 
 	xas_lock_irq(&xas);
 	if (!folio_ref_freeze(folio, expected_count)) {
+		count_vm_events(PGMIGRATE_REFCOUNT_FAIL, nr);
 		xas_unlock_irq(&xas);
 		return -EAGAIN;
 	}
@@ -1107,6 +1111,11 @@ static int unmap_and_move(new_page_t get_new_page,
 		return -ENOMEM;
 
 	newpage->private = 0;
+
+	/* TODO: check whether Ksm pages can be demoted? */
+	if (reason == MR_DEMOTION && !PageKsm(page))
+		set_page_demoted(newpage);
+
 	rc = __unmap_and_move(page, newpage, force, mode);
 	if (rc == MIGRATEPAGE_SUCCESS)
 		set_page_owner_migrate_reason(newpage, reason);
@@ -1442,6 +1451,7 @@ retry:
 				}
 
 				nr_failed_pages += nr_subpages;
+				count_vm_events(PGMIGRATE_NOMEM_FAIL, nr_subpages);
 				/*
 				 * There might be some subpages of fail-to-migrate THPs
 				 * left in thp_split_pages list. Move them back to migration
@@ -2031,6 +2041,8 @@ static int numamigrate_isolate_page(pg_data_t *pgdat, struct page *page)
 	if (!migrate_balanced_pgdat(pgdat, nr_pages)) {
 		int z;
 
+		count_vm_events(PGMIGRATE_DST_NODE_FULL_FAIL, nr_pages);
+
 		if (!(sysctl_numa_balancing_mode & NUMA_BALANCING_MEMORY_TIERING))
 			return 0;
 		for (z = pgdat->nr_zones - 1; z >= 0; z--) {
@@ -2068,6 +2080,7 @@ int migrate_misplaced_page(struct page *page, struct vm_area_struct *vma,
 	int isolated;
 	int nr_remaining;
 	unsigned int nr_succeeded;
+	bool is_file = page_is_file_lru(page);
 	LIST_HEAD(migratepages);
 	int nr_pages = thp_nr_pages(page);
 
@@ -2075,8 +2088,7 @@ int migrate_misplaced_page(struct page *page, struct vm_area_struct *vma,
 	 * Don't migrate file pages that are mapped in multiple processes
 	 * with execute permissions as they are probably shared libraries.
 	 */
-	if (page_mapcount(page) != 1 && page_is_file_lru(page) &&
-	    (vma->vm_flags & VM_EXEC))
+	if (page_mapcount(page) != 1 && is_file && (vma->vm_flags & VM_EXEC))
 		goto out;
 
 	/*
@@ -2087,10 +2099,13 @@ int migrate_misplaced_page(struct page *page, struct vm_area_struct *vma,
 		goto out;
 
 	isolated = numamigrate_isolate_page(pgdat, page);
-	if (!isolated)
+	if (!isolated) {
+		count_vm_events(PGMIGRATE_NUMA_ISOLATE_FAIL, thp_nr_pages(page));
 		goto out;
+	}
 
 	list_add(&page->lru, &migratepages);
+	count_vm_numa_event(PGPROMOTE_TRIED);
 	nr_remaining = migrate_pages(&migratepages, alloc_misplaced_dst_page,
 				     NULL, node, MIGRATE_ASYNC,
 				     MR_NUMA_MISPLACED, &nr_succeeded);
@@ -2098,16 +2113,21 @@ int migrate_misplaced_page(struct page *page, struct vm_area_struct *vma,
 		if (!list_empty(&migratepages)) {
 			list_del(&page->lru);
 			mod_node_page_state(page_pgdat(page), NR_ISOLATED_ANON +
-					page_is_file_lru(page), -nr_pages);
+					    is_file, -nr_pages);
 			putback_lru_page(page);
 		}
 		isolated = 0;
 	}
 	if (nr_succeeded) {
 		count_vm_numa_events(NUMA_PAGE_MIGRATE, nr_succeeded);
-		if (!node_is_toptier(page_to_nid(page)) && node_is_toptier(node))
+		if (!node_is_toptier(page_to_nid(page)) && node_is_toptier(node)) {
 			mod_node_page_state(pgdat, PGPROMOTE_SUCCESS,
 					    nr_succeeded);
+			if (is_file)
+				count_vm_numa_events(PGPROMOTE_FILE, nr_succeeded);
+			else
+				count_vm_numa_events(PGPROMOTE_ANON, nr_succeeded);
+		}
 	}
 	BUG_ON(!list_empty(&migratepages));
 	return isolated;

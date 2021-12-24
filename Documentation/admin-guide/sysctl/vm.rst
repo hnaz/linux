@@ -55,6 +55,7 @@ Currently, these files are in /proc/sys/vm:
 - nr_hugepages_mempolicy
 - nr_overcommit_hugepages
 - nr_trim_pages         (only if CONFIG_MMU=n)
+- numa_tier_interleave
 - numa_zonelist_order
 - oom_dump_tasks
 - oom_kill_allocating_task
@@ -634,6 +635,21 @@ trimming of allocations is initiated.
 The default value is 1.
 
 See Documentation/admin-guide/mm/nommu-mmap.rst for more information.
+
+
+numa_tier_interleave
+====================
+
+This sysctl is for tiered NUMA systems. It's a tuple that configures
+an N:M distribution between toptier and lowtier nodes for interleaving
+memory allocation policies.
+
+The first value configures the share of pages allocated on toptier
+nodes. The second value configures the share of lowtier placements.
+
+Allowed values range from 1 up to (and including) 100.
+
+The default value is 1 1, meaning even distribution.
 
 
 numa_zonelist_order

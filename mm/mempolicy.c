@@ -120,6 +120,9 @@ static struct kmem_cache *sn_cache;
    policied. */
 enum zone_type policy_zone = 0;
 
+/* Toptier:lowtier interleaving ratio */
+int numa_tier_interleave[2] = { 1, 1 };
+
 /*
  * run-time system-wide default policy => local allocation
  */
@@ -863,8 +866,10 @@ static long do_set_mempolicy(unsigned short mode, unsigned short flags,
 	task_lock(current);
 	old = current->mempolicy;
 	current->mempolicy = new;
-	if (new && new->mode == MPOL_INTERLEAVE)
+	if (new && new->mode == MPOL_INTERLEAVE) {
 		current->il_prev = MAX_NUMNODES-1;
+		current->il_count = 0;
+	}
 	task_unlock(current);
 	mpol_put(old);
 	ret = 0;
@@ -1873,15 +1878,47 @@ static int policy_node(gfp_t gfp, struct mempolicy *policy, int nd)
 	return nd;
 }
 
+static unsigned next_node_tier(int nid, struct mempolicy *policy, bool toptier)
+{
+	unsigned next = nid, start = nid;
+
+	do {
+		next = next_node_in(next, policy->nodes);
+		if (next == MAX_NUMNODES)
+			break;
+		if (toptier == node_is_toptier(next))
+			break;
+	} while (next != start);
+	return next;
+}
+
 /* Do dynamic interleaving for a process */
 static unsigned interleave_nodes(struct mempolicy *policy)
 {
 	unsigned next;
 	struct task_struct *me = current;
 
-	next = next_node_in(me->il_prev, policy->nodes);
+	if (numa_tier_interleave[0] > 1 || numa_tier_interleave[1] > 1) {
+		/*
+		 * When N:M interleaving is configured, allocate N
+		 * pages over toptier nodes first, then the remainder
+		 * on lowtier ones.
+		 */
+		if (me->il_count < numa_tier_interleave[0])
+			next = next_node_tier(me->il_prev, policy, true);
+		else
+			next = next_node_tier(me->il_prev, policy, false);
+		me->il_count++;
+		if (me->il_count >=
+		    numa_tier_interleave[0] + numa_tier_interleave[1])
+			me->il_count = 0;
+	} else {
+		next = next_node_in(me->il_prev, policy->nodes);
+	}
+
 	if (next < MAX_NUMNODES)
 		me->il_prev = next;
+
 	return next;
 }
 
@@ -1955,7 +1992,31 @@ static unsigned offset_il_node(struct mempolicy *pol, unsigned long n)
 	nnodes = nodes_weight(nodemask);
 	if (!nnodes)
 		return numa_node_id();
-	target = (unsigned int)n % nnodes;
+
+	if (numa_tier_interleave[0] > 1 || numa_tier_interleave[1] > 1) {
+		unsigned vnnodes = 0;
+		int vtarget;
+
+		/*
+		 * When N:M interleaving is configured, calculate a
+		 * virtual target for @n in an N:M-scaled nodelist...
+		 */
+		for_each_node_mask(nid, nodemask)
+			vnnodes += numa_tier_interleave[!node_is_toptier(nid)];
+		vtarget = (int)((unsigned int)n % vnnodes);
+
+		/* ...then map it back to the physical nodelist */
+		target = 0;
+		for_each_node_mask(nid, nodemask) {
+			vtarget -= numa_tier_interleave[!node_is_toptier(nid)];
+			if (vtarget < 0)
+				break;
+			target++;
+		}
+	} else {
+		target = (unsigned int)n % nnodes;
+	}
+
 	nid = first_node(nodemask);
 	for (i = 0; i < target; i++)
 		nid = next_node(nid, nodemask);

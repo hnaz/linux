@@ -54,6 +54,8 @@ struct mempolicy {
 	} w;
 };
 
+extern int numa_tier_interleave[2];
+
 /*
  * Support for managing mempolicy data objects (clone, copy, destroy)
  * The default fast path of a NULL MPOL_DEFAULT policy is always inlined.

@@ -2297,6 +2297,32 @@ out:
 }
 EXPORT_SYMBOL(vma_alloc_folio);
 
+struct page *alloc_pages_mpol(gfp_t gfp, unsigned int order,
+			      struct mempolicy *pol)
+{
+	struct page *page;
+
+	if (!pol)
+		pol = &default_policy;
+
+	/*
+	 * No reference counting needed for current->mempolicy
+	 * nor system default_policy
+	 */
+	if (pol->mode == MPOL_INTERLEAVE)
+		page = alloc_page_interleave(gfp, order, interleave_nodes(pol));
+	else if (pol->mode == MPOL_PREFERRED_MANY)
+		page = alloc_pages_preferred_many(gfp, order,
+				  policy_node(gfp, pol, numa_node_id()), pol);
+	else
+		page = __alloc_pages(gfp, order,
+				policy_node(gfp, pol, numa_node_id()),
+				policy_nodemask(gfp, pol));
+
+	return page;
+}
+EXPORT_SYMBOL(alloc_pages_mpol);
+
 /**
  * alloc_pages - Allocate pages.
  * @gfp: GFP flags.
@@ -2314,26 +2340,11 @@ EXPORT_SYMBOL(vma_alloc_folio);
 struct page *alloc_pages(gfp_t gfp, unsigned order)
 {
 	struct mempolicy *pol = &default_policy;
-	struct page *page;
 
 	if (!in_interrupt() && !(gfp & __GFP_THISNODE))
 		pol = get_task_policy(current);
 
-	/*
-	 * No reference counting needed for current->mempolicy
-	 * nor system default_policy
-	 */
-	if (pol->mode == MPOL_INTERLEAVE)
-		page = alloc_page_interleave(gfp, order, interleave_nodes(pol));
-	else if (pol->mode == MPOL_PREFERRED_MANY)
-		page = alloc_pages_preferred_many(gfp, order,
-				  policy_node(gfp, pol, numa_node_id()), pol);
-	else
-		page = __alloc_pages(gfp, order,
-				policy_node(gfp, pol, numa_node_id()),
-				policy_nodemask(gfp, pol));
-
-	return page;
+	return alloc_pages_mpol(gfp, order, pol);
 }
 EXPORT_SYMBOL(alloc_pages);
 

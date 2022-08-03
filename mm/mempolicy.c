@@ -3030,8 +3030,6 @@ static const char * const policy_modes[] =
 	[MPOL_PREFERRED_MANY]  = "prefer (many)",
 };
 
-
-#ifdef CONFIG_TMPFS
 /**
  * mpol_parse_str - parse string to mempolicy, for tmpfs mpol mount option.
  * @str:  string containing mempolicy to parse
@@ -3164,7 +3162,6 @@ out:
 		*mpol = new;
 	return err;
 }
-#endif /* CONFIG_TMPFS */
 
 /**
  * mpol_to_str - format a mempolicy structure for printing
@@ -3175,8 +3172,10 @@ out:
  * Convert @pol into a string.  If @buffer is too short, truncate the string.
  * Recommend a @maxlen of at least 32 for the longest mode, "interleave", the
  * longest flag, "relative", and to display at least a few node ids.
+ *
+ * Returns the number of bytes written to @buffer.
  */
-void mpol_to_str(char *buffer, int maxlen, struct mempolicy *pol)
+size_t mpol_to_str(char *buffer, int maxlen, struct mempolicy *pol)
 {
 	char *p = buffer;
 	nodemask_t nodes = NODE_MASK_NONE;
@@ -3200,8 +3199,7 @@ void mpol_to_str(char *buffer, int maxlen, struct mempolicy *pol)
 		break;
 	default:
 		WARN_ON_ONCE(1);
-		snprintf(p, maxlen, "unknown");
-		return;
+		return snprintf(p, maxlen, "unknown");
 	}
 
 	p += snprintf(p, maxlen, "%s", policy_modes[mode]);
@@ -3221,4 +3219,6 @@ void mpol_to_str(char *buffer, int maxlen, struct mempolicy *pol)
 	if (!nodes_empty(nodes))
 		p += scnprintf(p, buffer + maxlen - p, ":%*pbl",
 			       nodemask_pr_args(&nodes));
+
+	return p - buffer;
 }

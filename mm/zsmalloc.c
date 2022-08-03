@@ -396,9 +396,9 @@ static void zs_zpool_destroy(void *pool)
 }
 
 static int zs_zpool_malloc(void *pool, size_t size, gfp_t gfp,
-			unsigned long *handle)
+			   struct mempolicy *mpol, unsigned long *handle)
 {
-	*handle = zs_malloc(pool, size, gfp);
+	*handle = zs_malloc(pool, size, gfp, mpol);
 	return *handle ? 0 : -1;
 }
 static void zs_zpool_free(void *pool, unsigned long handle)
@@ -1051,8 +1051,8 @@ static void create_page_chain(struct size_class *class, struct zspage *zspage,
  * Allocate a zspage for the given size class
  */
 static struct zspage *alloc_zspage(struct zs_pool *pool,
-					struct size_class *class,
-					gfp_t gfp)
+				   struct size_class *class,
+				   gfp_t gfp, struct mempolicy *mpol)
 {
 	int i;
 	struct page *pages[ZS_MAX_PAGES_PER_ZSPAGE];
@@ -1067,7 +1067,7 @@ static struct zspage *alloc_zspage(struct zs_pool *pool,
 	for (i = 0; i < class->pages_per_zspage; i++) {
 		struct page *page;
 
-		page = alloc_page(gfp);
+		page = alloc_pages_mpol(gfp, 0, mpol);
 		if (!page) {
 			while (--i >= 0) {
 				dec_zone_page_state(pages[i], NR_ZSPAGES);
@@ -1398,12 +1398,14 @@ static unsigned long obj_malloc(struct zs_pool *pool,
  * @pool: pool to allocate from
  * @size: size of block to allocate
  * @gfp: gfp flags when allocating object
+ * @mpol: NUMA policy for the allocation
  *
  * On success, handle to the allocated object is returned,
  * otherwise 0.
  * Allocation requests with size > ZS_MAX_ALLOC_SIZE will fail.
  */
-unsigned long zs_malloc(struct zs_pool *pool, size_t size, gfp_t gfp)
+unsigned long zs_malloc(struct zs_pool *pool, size_t size, gfp_t gfp,
+			struct mempolicy *mpol)
 {
 	unsigned long handle, obj;
 	struct size_class *class;
@@ -1437,7 +1439,7 @@ unsigned long zs_malloc(struct zs_pool *pool, size_t size, gfp_t gfp)
 
 	spin_unlock(&class->lock);
 
-	zspage = alloc_zspage(pool, class, gfp);
+	zspage = alloc_zspage(pool, class, gfp, mpol);
 	if (!zspage) {
 		cache_free_handle(pool, handle);
 		return 0;

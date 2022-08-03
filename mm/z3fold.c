@@ -843,7 +843,7 @@ static void compact_page_work(struct work_struct *w)
 
 /* returns _locked_ z3fold page header or NULL */
 static inline struct z3fold_header *__z3fold_alloc(struct z3fold_pool *pool,
-						size_t size, bool can_sleep)
+						   size_t size, bool can_sleep)
 {
 	struct z3fold_header *zhdr = NULL;
 	struct page *page;
@@ -1053,6 +1053,7 @@ static void z3fold_destroy_pool(struct z3fold_pool *pool)
  * @pool:	z3fold pool from which to allocate
  * @size:	size in bytes of the desired allocation
  * @gfp:	gfp flags used if the pool needs to grow
+ * @mpol:	NUMA policy for the allocation
  * @handle:	handle of the new allocation
  *
  * This function will attempt to find a free region in the pool large enough to
@@ -1065,7 +1066,7 @@ static void z3fold_destroy_pool(struct z3fold_pool *pool)
  * a new page.
  */
 static int z3fold_alloc(struct z3fold_pool *pool, size_t size, gfp_t gfp,
-			unsigned long *handle)
+			struct mempolicy *mpol, unsigned long *handle)
 {
 	int chunks = size_to_chunks(size);
 	struct z3fold_header *zhdr = NULL;
@@ -1100,7 +1101,7 @@ retry:
 		bud = FIRST;
 	}
 
-	page = alloc_page(gfp);
+	page = alloc_pages_mpol(gfp, 0, mpol);
 	if (!page)
 		return -ENOMEM;
 
@@ -1685,9 +1686,9 @@ static void z3fold_zpool_destroy(void *pool)
 }
 
 static int z3fold_zpool_malloc(void *pool, size_t size, gfp_t gfp,
-			unsigned long *handle)
+			       struct mempolicy *mpol, unsigned long *handle)
 {
-	return z3fold_alloc(pool, size, gfp, handle);
+	return z3fold_alloc(pool, size, gfp, mpol, handle);
 }
 static void z3fold_zpool_free(void *pool, unsigned long handle)
 {

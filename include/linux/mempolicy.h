@@ -176,11 +176,8 @@ int do_migrate_pages(struct mm_struct *mm, const nodemask_t *from,
 		     const nodemask_t *to, int flags);
 
 
-#ifdef CONFIG_TMPFS
 extern int mpol_parse_str(char *str, struct mempolicy **mpol);
-#endif
-
-extern void mpol_to_str(char *buffer, int maxlen, struct mempolicy *pol);
+extern size_t mpol_to_str(char *buffer, int maxlen, struct mempolicy *pol);
 
 /* Check if a vma is migratable */
 extern bool vma_migratable(struct vm_area_struct *vma);

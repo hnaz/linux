@@ -251,6 +251,7 @@ static void zbud_destroy_pool(struct zbud_pool *pool)
  * @pool:	zbud pool from which to allocate
  * @size:	size in bytes of the desired allocation
  * @gfp:	gfp flags used if the pool needs to grow
+ * @mpol:	NUMA policy for the allocation
  * @handle:	handle of the new allocation
  *
  * This function will attempt to find a free region in the pool large enough to
@@ -266,7 +267,7 @@ static void zbud_destroy_pool(struct zbud_pool *pool)
  * a new page.
  */
 static int zbud_alloc(struct zbud_pool *pool, size_t size, gfp_t gfp,
-			unsigned long *handle)
+		      struct mempolicy *mpol, unsigned long *handle)
 {
 	int chunks, i, freechunks;
 	struct zbud_header *zhdr = NULL;
@@ -296,7 +297,7 @@ static int zbud_alloc(struct zbud_pool *pool, size_t size, gfp_t gfp,
 
 	/* Couldn't find unbuddied zbud page, create new one */
 	spin_unlock(&pool->lock);
-	page = alloc_page(gfp);
+	page = alloc_pages_mpol(gfp, 0, mpol);
 	if (!page)
 		return -ENOMEM;
 	spin_lock(&pool->lock);
@@ -556,9 +557,9 @@ static void zbud_zpool_destroy(void *pool)
 }
 
 static int zbud_zpool_malloc(void *pool, size_t size, gfp_t gfp,
-			unsigned long *handle)
+			     struct mempolicy *mpol, unsigned long *handle)
 {
-	return zbud_alloc(pool, size, gfp, handle);
+	return zbud_alloc(pool, size, gfp, mpol, handle);
 }
 static void zbud_zpool_free(void *pool, unsigned long handle)
 {

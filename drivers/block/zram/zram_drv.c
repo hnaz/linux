@@ -1385,7 +1385,7 @@ static int __zram_bvec_write(struct zram *zram, struct bio_vec *bvec,
 			__GFP_KSWAPD_RECLAIM |
 			__GFP_NOWARN |
 			__GFP_HIGHMEM |
-			__GFP_MOVABLE);
+			__GFP_MOVABLE, NULL);
 
 	if (unlikely(!handle)) {
 		zcomp_stream_put(zram->comp);

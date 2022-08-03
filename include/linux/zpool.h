@@ -13,6 +13,7 @@
 #define _ZPOOL_H_
 
 struct zpool;
+struct mempolicy;
 
 struct zpool_ops {
 	int (*evict)(struct zpool *pool, unsigned long handle);
@@ -49,7 +50,7 @@ void zpool_destroy_pool(struct zpool *pool);
 bool zpool_malloc_support_movable(struct zpool *pool);
 
 int zpool_malloc(struct zpool *pool, size_t size, gfp_t gfp,
-			unsigned long *handle);
+		 struct mempolicy *mpol, unsigned long *handle);
 
 void zpool_free(struct zpool *pool, unsigned long handle);
 
@@ -95,7 +96,7 @@ struct zpool_driver {
 
 	bool malloc_support_movable;
 	int (*malloc)(void *pool, size_t size, gfp_t gfp,
-				unsigned long *handle);
+		      struct mempolicy *mpol, unsigned long *handle);
 	void (*free)(void *pool, unsigned long handle);
 
 	int (*shrink)(void *pool, unsigned int pages,

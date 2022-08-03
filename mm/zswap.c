@@ -35,6 +35,7 @@
 #include <linux/writeback.h>
 #include <linux/pagemap.h>
 #include <linux/workqueue.h>
+#include <linux/mempolicy.h>
 
 #include "swap.h"
 
@@ -112,6 +113,20 @@ static const struct kernel_param_ops zswap_zpool_param_ops = {
 	.free =		param_free_charp,
 };
 module_param_cb(zpool, &zswap_zpool_param_ops, &zswap_zpool_type, 0644);
+
+/* Compressed storage NUMA policy */
+#ifdef CONFIG_NUMA
+static struct mempolicy __rcu *zswap_mempolicy;
+static int zswap_mempolicy_param_set(const char *, const struct kernel_param *);
+static int zswap_mempolicy_param_get(char *, const struct kernel_param *);
+static const struct kernel_param_ops zswap_mempolicy_param_ops = {
+	.set =		zswap_mempolicy_param_set,
+	.get =		zswap_mempolicy_param_get,
+};
+module_param_cb(mempolicy, &zswap_mempolicy_param_ops, &zswap_mempolicy, 0644);
+#else
+#define zswap_mempolicy NULL
+#endif
 
 /* The maximum percentage of memory that the compressed pool can occupy */
 static unsigned int zswap_max_pool_percent = 20;
@@ -887,6 +902,63 @@ static int zswap_enabled_param_set(const char *val,
 	return param_set_bool(val, kp);
 }
 
+#ifdef CONFIG_NUMA
+static struct mempolicy *zswap_mempolicy_get(void)
+{
+	struct mempolicy *pol;
+
+	rcu_read_lock();
+	pol = rcu_access_pointer(zswap_mempolicy);
+	if (pol)
+		mpol_get(pol);
+	rcu_read_unlock();
+	return pol;
+}
+
+static int zswap_mempolicy_param_set(const char *buf,
+				     const struct kernel_param *kp)
+{
+	struct mempolicy *old, *new = NULL;
+	char *dup, *str;
+	int ret;
+
+	/* mpol_parse_str() is destructive */
+	dup = kstrdup(buf, GFP_KERNEL);
+	str = strstrip(dup);
+	ret = mpol_parse_str(str, &new);
+	kfree(dup);
+	if (ret)
+		return -EINVAL;
+
+	old = unrcu_pointer(xchg(&zswap_mempolicy, new));
+	if (old) {
+		synchronize_rcu();
+		mpol_put(old);
+	}
+
+	return 0;
+}
+
+static int zswap_mempolicy_param_get(char *buf, const struct kernel_param *kp)
+{
+	struct mempolicy *pol;
+	int len;
+
+	pol = zswap_mempolicy_get();
+	len = mpol_to_str(buf, PAGE_SIZE - 1, pol);
+	mpol_put(pol);
+	buf[len++] = '\n';
+	buf[len] = 0;
+	return len;
+}
+
+#else
+static struct mempolicy *zswap_mempolicy_get(void)
+{
+	return NULL;
+}
+#endif
+
 /*********************************
 * writeback code
 **********************************/
@@ -1109,6 +1181,7 @@ static int zswap_frontswap_store(unsigned type, pgoff_t offset,
 	char *buf;
 	u8 *src, *dst;
 	struct zswap_header zhdr = { .swpentry = swp_entry(type, offset) };
+	struct mempolicy *mpol;
 	gfp_t gfp;
 
 	/* THP isn't supported */
@@ -1211,7 +1284,9 @@ static int zswap_frontswap_store(unsigned type, pgoff_t offset,
 	gfp = __GFP_NORETRY | __GFP_NOWARN | __GFP_KSWAPD_RECLAIM;
 	if (zpool_malloc_support_movable(entry->pool->zpool))
 		gfp |= __GFP_HIGHMEM | __GFP_MOVABLE;
-	ret = zpool_malloc(entry->pool->zpool, hlen + dlen, gfp, &handle);
+	mpol = zswap_mempolicy_get();
+	ret = zpool_malloc(entry->pool->zpool, hlen + dlen, gfp, mpol, &handle);
+	mpol_put(mpol);
 	if (ret == -ENOSPC) {
 		zswap_reject_compress_poor++;
 		goto put_dstmem;

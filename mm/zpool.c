@@ -249,6 +249,7 @@ bool zpool_malloc_support_movable(struct zpool *zpool)
  * @zpool:	The zpool to allocate from.
  * @size:	The amount of memory to allocate.
  * @gfp:	The GFP flags to use when allocating memory.
+ * @mpol:	The NUMA policy for the allocation
  * @handle:	Pointer to the handle to set
  *
  * This allocates the requested amount of memory from the pool.
@@ -261,9 +262,9 @@ bool zpool_malloc_support_movable(struct zpool *zpool)
  * Returns: 0 on success, negative value on error.
  */
 int zpool_malloc(struct zpool *zpool, size_t size, gfp_t gfp,
-			unsigned long *handle)
+		 struct mempolicy *mpol, unsigned long *handle)
 {
-	return zpool->driver->malloc(zpool->pool, size, gfp, handle);
+	return zpool->driver->malloc(zpool->pool, size, gfp, mpol, handle);
 }
 
 /**

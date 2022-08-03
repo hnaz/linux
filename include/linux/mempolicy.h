@@ -52,6 +52,8 @@ struct mempolicy {
 		nodemask_t cpuset_mems_allowed;	/* relative to these nodes */
 		nodemask_t user_nodemask;	/* nodemask passed by user */
 	} w;
+	short il_prev;		/* Interleaving cursor */
+	short il_count;		/* M:N interleaving counter */
 };
 
 extern int numa_tier_interleave[2];

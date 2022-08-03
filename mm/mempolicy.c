@@ -867,8 +867,8 @@ static long do_set_mempolicy(unsigned short mode, unsigned short flags,
 	old = current->mempolicy;
 	current->mempolicy = new;
 	if (new && new->mode == MPOL_INTERLEAVE) {
-		current->il_prev = MAX_NUMNODES-1;
-		current->il_count = 0;
+		new->il_prev = MAX_NUMNODES-1;
+		new->il_count = 0;
 	}
 	task_unlock(current);
 	mpol_put(old);
@@ -979,7 +979,7 @@ static long do_get_mempolicy(int *policy, nodemask_t *nmask,
 			*policy = err;
 		} else if (pol == current->mempolicy &&
 				pol->mode == MPOL_INTERLEAVE) {
-			*policy = next_node_in(current->il_prev, pol->nodes);
+			*policy = next_node_in(pol->il_prev, pol->nodes);
 		} else {
 			err = -EINVAL;
 			goto out;
@@ -1896,7 +1896,6 @@ static unsigned next_node_tier(int nid, struct mempolicy *policy, bool toptier)
 static unsigned interleave_nodes(struct mempolicy *policy)
 {
 	unsigned next;
-	struct task_struct *me = current;
 
 	if (numa_tier_interleave[0] > 1 || numa_tier_interleave[1] > 1) {
 		/*
@@ -1904,20 +1903,20 @@ static unsigned interleave_nodes(struct mempolicy *policy)
 		 * pages over toptier nodes first, then the remainder
 		 * on lowtier ones.
 		 */
-		if (me->il_count < numa_tier_interleave[0])
-			next = next_node_tier(me->il_prev, policy, true);
+		if (policy->il_count < numa_tier_interleave[0])
+			next = next_node_tier(policy->il_prev, policy, true);
 		else
-			next = next_node_tier(me->il_prev, policy, false);
-		me->il_count++;
-		if (me->il_count >=
+			next = next_node_tier(policy->il_prev, policy, false);
+		policy->il_count++;
+		if (policy->il_count >=
 		    numa_tier_interleave[0] + numa_tier_interleave[1])
-			me->il_count = 0;
+			policy->il_count = 0;
 	} else {
-		next = next_node_in(me->il_prev, policy->nodes);
+		next = next_node_in(policy->il_prev, policy->nodes);
 	}
 
 	if (next < MAX_NUMNODES)
-		me->il_prev = next;
+		policy->il_prev = next;
 
 	return next;
 }
